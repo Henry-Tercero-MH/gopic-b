@@ -1,0 +1,35 @@
+# Entorno de desarrollo local. En Railway NO se usa este compose:
+# allá se crea un servicio Postgres administrado y se despliega la API con el Dockerfile.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gopic-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gopic
+      POSTGRES_PASSWORD: gopic
+      POSTGRES_DB: gopic
+    ports:
+      # 5433 en el host para no chocar con un Postgres local en 5432.
+      - "5433:5432"
+    volumes:
+      - gopic_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gopic -d gopic"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Cliente web ligero para inspeccionar la base (opcional): http://localhost:8080
+  adminer:
+    image: adminer:latest
+    container_name: gopic-adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+volumes:
+  gopic_pgdata:

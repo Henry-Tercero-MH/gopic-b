@@ -1,0 +1,1099 @@
+// GOPIC — Schema Prisma (NÚCLEO). Deriva de docs/modelo-entidad-relacion.md (v4.0).
+// Convenciones: tablas snake_case singular (@@map), campos camelCase (@map),
+// PK UUID, importes Decimal, timestamps TIMESTAMPTZ, soft-delete en catálogos.
+//
+// PENDIENTE (migración SQL manual, no expresable en Prisma):
+//   · CHECK constraints (rangos, estados condicionales, num_nonnulls)
+//   · columnas GENERATED (subtotales, diferencias, periodos)
+//   · índices ÚNICOS PARCIALES (WHERE deleted_at IS NULL / WHERE activa …)
+//   · EXCLUDE de reservaciones (btree_gist), CITEXT, funciones PL/pgSQL
+//   · FK compuestas (id, sucursal_id) anti-cruce entre sucursales
+//   · Módulo 17 (pedidos en línea) — fuera del núcleo
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Enums ───────────────────────────────
+enum Estacion {
+  Barra
+  Cocina
+}
+
+enum TipoVenta {
+  mesa
+  mostrador
+  llevar
+}
+
+enum TipoVentaDoc {
+  mesa
+  mostrador
+  llevar
+  delivery
+  pickup
+}
+
+enum EstadoCuenta {
+  abierta
+  cobrada
+  cancelada
+}
+
+enum EstadoComanda {
+  pendiente
+  preparacion
+  listo
+  entregada
+}
+
+enum EstadoMesa {
+  libre
+  ocupada
+  cuenta
+  reservada
+}
+
+enum TipoInsumo {
+  materia_prima
+  elaborado
+  terminado
+}
+
+enum TipoUnidad {
+  Peso
+  Volumen
+  Unidad
+}
+
+enum TipoMovInv {
+  Entrada
+  Salida
+  Ajuste
+  Merma
+}
+
+enum EstadoConteo {
+  borrador
+  aplicado
+}
+
+enum EstadoOrden {
+  borrador
+  enviada
+  recibida
+  cancelada
+}
+
+enum EstadoReservacion {
+  confirmada
+  cumplida
+  cancelada
+}
+
+enum EstadoFactura {
+  emitida
+  cancelada
+}
+
+enum OrigenFactura {
+  pos
+  online
+}
+
+enum TipoPromo {
+  porcentaje
+  monto
+  dos_x_uno  @map("2x1")
+  combo
+}
+
+enum EstadoCajaSesion {
+  abierta
+  cerrada
+}
+
+enum TipoCajaMov {
+  Apertura
+  Ingreso
+  Retiro
+}
+
+enum TipoRecompensa {
+  producto
+  descuento_monto
+  descuento_pct
+}
+
+enum TipoMovLealtad {
+  acumula
+  canjea
+}
+
+enum MetodoGasto {
+  Efectivo
+  Transferencia
+  Tarjeta
+}
+
+enum EstadoGasto {
+  pagado
+  pendiente
+}
+
+enum AccionBitacora {
+  crear
+  editar
+  eliminar
+  cancelar
+}
+
+// ─────────────────────────── Multi-sucursal ───────────────────────────
+model Sucursal {
+  id          String    @id @default(uuid()) @db.Uuid
+  nombre      String    @db.VarChar(120)
+  nit         String    @db.VarChar(20)
+  direccion   String    @db.VarChar(200)
+  telefono    String    @db.VarChar(30)
+  moneda      String    @default("GTQ") @db.Char(3)
+  logoDriveId String?   @map("logo_drive_id") @db.VarChar(100)
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  usuarios        Usuario[]
+  roles           Rol[]
+  empleados       Empleado[]
+  turnos          Turno[]
+  categorias      Categoria[]
+  productos       Producto[]
+  gruposMod       GrupoModificador[]
+  insumos         Insumo[]
+  existencias     Existencia[]
+  movimientosInv  MovimientoInventario[]
+  conteos         ConteoFisico[]
+  proveedores     Proveedor[]
+  ordenesCompra   OrdenCompra[]
+  zonas           Zona[]
+  mesas           Mesa[]
+  cuentas         Cuenta[]
+  facturas        Factura[]
+  promociones     Promocion[]
+  cajas           Caja[]
+  cajaSesiones    CajaSesion[]
+  clientes        Cliente[]
+  configLealtad   ConfigLealtad?
+  recompensas     Recompensa[]
+  gastos          Gasto[]
+  bitacoras       Bitacora[]
+  folioSecuencias FolioSecuencia[]
+
+  @@map("sucursal")
+}
+
+// ─────────────────────────── Seguridad / RBAC ───────────────────────────
+model Usuario {
+  id               String    @id @default(uuid()) @db.Uuid
+  empleadoId       String?   @unique @map("empleado_id") @db.Uuid
+  empleado         Empleado? @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
+  sucursalId       String    @map("sucursal_id") @db.Uuid
+  sucursal         Sucursal  @relation(fields: [sucursalId], references: [id])
+  email            String    @unique @db.VarChar(160)
+  passwordHash     String    @map("password_hash") @db.VarChar(255)
+  intentosFallidos Int       @default(0) @map("intentos_fallidos") @db.SmallInt
+  bloqueadoHasta   DateTime? @map("bloqueado_hasta") @db.Timestamptz(6)
+  activo           Boolean   @default(true)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  roles          UsuarioRol[]
+  sesiones       Sesion[]
+  bitacoras      Bitacora[]
+  facturas       Factura[]
+  ordenesCompra  OrdenCompra[]
+  gastos         Gasto[]
+  conteos        ConteoFisico[]
+  cajaSesiones   CajaSesion[]
+  movimientosInv MovimientoInventario[]
+  notasCredito   NotaCredito[]
+
+  @@map("usuario")
+}
+
+model Rol {
+  id          String    @id @default(uuid()) @db.Uuid
+  sucursalId  String?   @map("sucursal_id") @db.Uuid
+  sucursal    Sucursal? @relation(fields: [sucursalId], references: [id])
+  nombre      String    @db.VarChar(60)
+  descripcion String    @db.VarChar(200)
+  esSistema   Boolean   @default(false) @map("es_sistema")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  permisos RolPermiso[]
+  usuarios UsuarioRol[]
+
+  @@map("rol")
+}
+
+model Permiso {
+  id          String   @id @default(uuid()) @db.Uuid
+  codigo      String   @unique @db.VarChar(80)
+  descripcion String   @db.VarChar(200)
+  modulo      String   @db.VarChar(40)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roles RolPermiso[]
+
+  @@map("permiso")
+}
+
+model RolPermiso {
+  rolId     String  @map("rol_id") @db.Uuid
+  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permisoId String  @map("permiso_id") @db.Uuid
+  permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+  @@map("rol_permiso")
+}
+
+model UsuarioRol {
+  usuarioId String  @map("usuario_id") @db.Uuid
+  usuario   Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  rolId     String  @map("rol_id") @db.Uuid
+  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Restrict)
+
+  @@id([usuarioId, rolId])
+  @@map("usuario_rol")
+}
+
+model Sesion {
+  id               String   @id @default(uuid()) @db.Uuid
+  usuarioId        String   @map("usuario_id") @db.Uuid
+  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  refreshTokenHash String   @map("refresh_token_hash") @db.VarChar(255)
+  expiraEn         DateTime @map("expira_en") @db.Timestamptz(6)
+  revocada         Boolean  @default(false)
+  userAgent        String?  @map("user_agent") @db.VarChar(255)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([usuarioId])
+  @@map("sesion")
+}
+
+model Bitacora {
+  id            String         @id @default(uuid()) @db.Uuid
+  usuarioId     String?        @map("usuario_id") @db.Uuid
+  usuario       Usuario?       @relation(fields: [usuarioId], references: [id])
+  sucursalId    String         @map("sucursal_id") @db.Uuid
+  sucursal      Sucursal       @relation(fields: [sucursalId], references: [id])
+  entidad       String         @db.VarChar(60)
+  entidadId     String         @map("entidad_id") @db.Uuid
+  accion        AccionBitacora
+  valorAnterior Json?          @map("valor_anterior")
+  valorNuevo    Json?          @map("valor_nuevo")
+  ip            String?        @db.Inet
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([entidad, entidadId])
+  @@map("bitacora")
+}
+
+// ─────────────────────────────── Personal ───────────────────────────────
+model Puesto {
+  id          String    @id @default(uuid()) @db.Uuid
+  nombre      String    @db.VarChar(60)
+  salarioBase Decimal   @map("salario_base") @db.Decimal(12, 4)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  empleados Empleado[]
+
+  @@map("puesto")
+}
+
+model Empleado {
+  id           String    @id @default(uuid()) @db.Uuid
+  sucursalId   String    @map("sucursal_id") @db.Uuid
+  sucursal     Sucursal  @relation(fields: [sucursalId], references: [id])
+  puestoId     String    @map("puesto_id") @db.Uuid
+  puesto       Puesto    @relation(fields: [puestoId], references: [id], onDelete: Restrict)
+  nombre       String    @db.VarChar(120)
+  telefono     String?   @db.VarChar(30)
+  email        String?   @db.VarChar(160)
+  fechaIngreso DateTime  @map("fecha_ingreso") @db.Date
+  fotoDriveId  String?   @map("foto_drive_id") @db.VarChar(100)
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  usuario  Usuario?
+  marcajes Marcaje[]
+  cuentas  Cuenta[]
+
+  @@map("empleado")
+}
+
+model Turno {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(40)
+  horaInicio DateTime  @map("hora_inicio") @db.Time(6)
+  horaFin    DateTime  @map("hora_fin") @db.Time(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  marcajes Marcaje[]
+
+  @@map("turno")
+}
+
+model Marcaje {
+  id                String    @id @default(uuid()) @db.Uuid
+  empleadoId        String    @map("empleado_id") @db.Uuid
+  empleado          Empleado  @relation(fields: [empleadoId], references: [id])
+  turnoId           String?   @map("turno_id") @db.Uuid
+  turno             Turno?    @relation(fields: [turnoId], references: [id])
+  entrada           DateTime? @db.Timestamptz(6)
+  salida            DateTime? @db.Timestamptz(6)
+  minutosTrabajados Int?      @map("minutos_trabajados")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([empleadoId, entrada])
+  @@map("marcaje")
+}
+
+// ─────────────────── Catálogos de producto y modificadores ───────────────────
+model Categoria {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(80)
+  icono      String?   @db.VarChar(40)
+  orden      Int       @default(0) @db.SmallInt
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  productos          Producto[]
+  promocionObjetivos PromocionObjetivo[]
+
+  @@map("categoria")
+}
+
+model Producto {
+  id            String    @id @default(uuid()) @db.Uuid
+  sucursalId    String    @map("sucursal_id") @db.Uuid
+  sucursal      Sucursal  @relation(fields: [sucursalId], references: [id])
+  categoriaId   String    @map("categoria_id") @db.Uuid
+  categoria     Categoria @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+  nombre        String    @db.VarChar(120)
+  precio        Decimal   @db.Decimal(12, 4)
+  imagenDriveId String?   @map("imagen_drive_id") @db.VarChar(100)
+  imagenUrl     String?   @map("imagen_url") @db.VarChar(500)
+  estacion      Estacion
+  destacado     Boolean   @default(false)
+  activo        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  gruposMod          ProductoGrupoModificador[]
+  receta             Receta?
+  comandaDetalles    ComandaDetalle[]
+  facturaDetalles    FacturaDetalle[]
+  promocionObjetivos PromocionObjetivo[]
+  comboComponentes   ComboComponente[]
+  recompensas        Recompensa[]
+
+  @@map("producto")
+}
+
+model GrupoModificador {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(80)
+  requerido  Boolean
+  multiple   Boolean
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  opciones  OpcionModificador[]
+  productos ProductoGrupoModificador[]
+
+  @@map("grupo_modificador")
+}
+
+model OpcionModificador {
+  id                 String           @id @default(uuid()) @db.Uuid
+  grupoModificadorId String           @map("grupo_modificador_id") @db.Uuid
+  grupo              GrupoModificador @relation(fields: [grupoModificadorId], references: [id], onDelete: Cascade)
+  nombre             String           @db.VarChar(80)
+  precioExtra        Decimal          @default(0) @map("precio_extra") @db.Decimal(12, 4)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime?        @map("deleted_at") @db.Timestamptz(6)
+
+  facturaDetalleMods FacturaDetalleModificador[]
+
+  @@map("opcion_modificador")
+}
+
+model ProductoGrupoModificador {
+  productoId         String           @map("producto_id") @db.Uuid
+  producto           Producto         @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  grupoModificadorId String           @map("grupo_modificador_id") @db.Uuid
+  grupo              GrupoModificador @relation(fields: [grupoModificadorId], references: [id], onDelete: Cascade)
+
+  @@id([productoId, grupoModificadorId])
+  @@map("producto_grupo_modificador")
+}
+
+// ─────────────────────────── Recetario / costeo ───────────────────────────
+model Receta {
+  id             String    @id @default(uuid()) @db.Uuid
+  productoId     String    @unique @map("producto_id") @db.Uuid
+  producto       Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  rendimiento    Decimal   @db.Decimal(12, 4)
+  costoCalculado Decimal   @map("costo_calculado") @db.Decimal(12, 4)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  detalles RecetaDetalle[]
+
+  @@map("receta")
+}
+
+model RecetaDetalle {
+  id        String   @id @default(uuid()) @db.Uuid
+  recetaId  String   @map("receta_id") @db.Uuid
+  receta    Receta   @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+  insumoId  String   @map("insumo_id") @db.Uuid
+  insumo    Insumo   @relation(fields: [insumoId], references: [id], onDelete: Restrict)
+  cantidad  Decimal  @db.Decimal(12, 4)
+  mermaPct  Decimal  @default(0) @map("merma_pct") @db.Decimal(5, 2)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([recetaId, insumoId])
+  @@map("receta_detalle")
+}
+
+// ─────────────────────────────── Inventario ───────────────────────────────
+model UnidadMedida {
+  id          String     @id @default(uuid()) @db.Uuid
+  nombre      String     @db.VarChar(60)
+  abreviatura String     @unique @db.VarChar(10)
+  tipo        TipoUnidad
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  insumos Insumo[]
+
+  @@map("unidad_medida")
+}
+
+model Insumo {
+  id             String       @id @default(uuid()) @db.Uuid
+  sucursalId     String       @map("sucursal_id") @db.Uuid
+  sucursal       Sucursal     @relation(fields: [sucursalId], references: [id])
+  unidadMedidaId String       @map("unidad_medida_id") @db.Uuid
+  unidadMedida   UnidadMedida @relation(fields: [unidadMedidaId], references: [id], onDelete: Restrict)
+  nombre         String       @db.VarChar(120)
+  categoria      String?      @db.VarChar(60)
+  tipo           TipoInsumo
+  costoPromedio  Decimal      @default(0) @map("costo_promedio") @db.Decimal(12, 4)
+  stockMinimo    Decimal      @default(0) @map("stock_minimo") @db.Decimal(12, 4)
+  puntoReorden   Decimal      @default(0) @map("punto_reorden") @db.Decimal(12, 4)
+  activo         Boolean      @default(true)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz(6)
+
+  existencia     Existencia?
+  recetaDetalles RecetaDetalle[]
+  movimientosInv MovimientoInventario[]
+  ordenDetalles  OrdenCompraDetalle[]
+  conteoDetalles ConteoDetalle[]
+
+  @@map("insumo")
+}
+
+model Existencia {
+  id         String   @id @default(uuid()) @db.Uuid
+  insumoId   String   @unique @map("insumo_id") @db.Uuid
+  insumo     Insumo   @relation(fields: [insumoId], references: [id])
+  sucursalId String   @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
+  cantidad   Decimal  @default(0) @db.Decimal(12, 4)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("existencia")
+}
+
+model MovimientoInventario {
+  id             String        @id @default(uuid()) @db.Uuid
+  insumoId       String        @map("insumo_id") @db.Uuid
+  insumo         Insumo        @relation(fields: [insumoId], references: [id])
+  sucursalId     String        @map("sucursal_id") @db.Uuid
+  sucursal       Sucursal      @relation(fields: [sucursalId], references: [id])
+  tipo           TipoMovInv
+  cantidad       Decimal       @db.Decimal(12, 4)
+  saldo          Decimal       @db.Decimal(12, 4)
+  costoUnitario  Decimal       @map("costo_unitario") @db.Decimal(12, 4)
+  motivo         String?       @db.VarChar(120)
+  ordenCompraId  String?       @map("orden_compra_id") @db.Uuid
+  ordenCompra    OrdenCompra?  @relation(fields: [ordenCompraId], references: [id])
+  facturaId      String?       @map("factura_id") @db.Uuid
+  factura        Factura?      @relation(fields: [facturaId], references: [id])
+  conteoFisicoId String?       @map("conteo_fisico_id") @db.Uuid
+  conteoFisico   ConteoFisico? @relation(fields: [conteoFisicoId], references: [id])
+  usuarioId      String?       @map("usuario_id") @db.Uuid
+  usuario        Usuario?      @relation(fields: [usuarioId], references: [id])
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([insumoId, createdAt])
+  @@map("movimiento_inventario")
+}
+
+model ConteoFisico {
+  id         String       @id @default(uuid()) @db.Uuid
+  sucursalId String       @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal     @relation(fields: [sucursalId], references: [id])
+  usuarioId  String       @map("usuario_id") @db.Uuid
+  usuario    Usuario      @relation(fields: [usuarioId], references: [id])
+  fecha      DateTime     @default(now()) @db.Timestamptz(6)
+  estado     EstadoConteo @default(borrador)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  detalles       ConteoDetalle[]
+  movimientosInv MovimientoInventario[]
+
+  @@map("conteo_fisico")
+}
+
+model ConteoDetalle {
+  id              String       @id @default(uuid()) @db.Uuid
+  conteoFisicoId  String       @map("conteo_fisico_id") @db.Uuid
+  conteoFisico    ConteoFisico @relation(fields: [conteoFisicoId], references: [id], onDelete: Cascade)
+  insumoId        String       @map("insumo_id") @db.Uuid
+  insumo          Insumo       @relation(fields: [insumoId], references: [id], onDelete: Restrict)
+  cantidadTeorica Decimal      @map("cantidad_teorica") @db.Decimal(12, 4)
+  cantidadFisica  Decimal      @map("cantidad_fisica") @db.Decimal(12, 4)
+
+  @@unique([conteoFisicoId, insumoId])
+  @@map("conteo_detalle")
+}
+
+// ─────────────────────────────── Compras ───────────────────────────────
+model Proveedor {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(120)
+  contacto   String?   @db.VarChar(120)
+  telefono   String?   @db.VarChar(30)
+  email      String?   @db.VarChar(160)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  ordenesCompra OrdenCompra[]
+  gastos        Gasto[]
+
+  @@map("proveedor")
+}
+
+model OrdenCompra {
+  id          String      @id @default(uuid()) @db.Uuid
+  sucursalId  String      @map("sucursal_id") @db.Uuid
+  sucursal    Sucursal    @relation(fields: [sucursalId], references: [id])
+  proveedorId String      @map("proveedor_id") @db.Uuid
+  proveedor   Proveedor   @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  usuarioId   String      @map("usuario_id") @db.Uuid
+  usuario     Usuario     @relation(fields: [usuarioId], references: [id])
+  folio       String      @db.VarChar(20)
+  fecha       DateTime    @default(now()) @db.Date
+  estado      EstadoOrden @default(borrador)
+  total       Decimal     @default(0) @db.Decimal(12, 4)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  detalles       OrdenCompraDetalle[]
+  movimientosInv MovimientoInventario[]
+
+  @@unique([sucursalId, folio])
+  @@map("orden_compra")
+}
+
+model OrdenCompraDetalle {
+  id            String      @id @default(uuid()) @db.Uuid
+  ordenCompraId String      @map("orden_compra_id") @db.Uuid
+  ordenCompra   OrdenCompra @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+  insumoId      String      @map("insumo_id") @db.Uuid
+  insumo        Insumo      @relation(fields: [insumoId], references: [id], onDelete: Restrict)
+  cantidad      Decimal     @db.Decimal(12, 4)
+  costoUnitario Decimal     @map("costo_unitario") @db.Decimal(12, 4)
+
+  @@map("orden_compra_detalle")
+}
+
+// ─────────────────────────────── Salón ───────────────────────────────
+model Zona {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(60)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  mesas Mesa[]
+
+  @@map("zona")
+}
+
+model Mesa {
+  id         String     @id @default(uuid()) @db.Uuid
+  zonaId     String     @map("zona_id") @db.Uuid
+  zona       Zona       @relation(fields: [zonaId], references: [id], onDelete: Restrict)
+  sucursalId String     @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal   @relation(fields: [sucursalId], references: [id])
+  nombre     String     @db.VarChar(40)
+  capacidad  Int        @db.SmallInt
+  estado     EstadoMesa @default(libre)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  reservaciones Reservacion[]
+  cuentas       Cuenta[]
+
+  @@map("mesa")
+}
+
+model Reservacion {
+  id        String            @id @default(uuid()) @db.Uuid
+  mesaId    String            @map("mesa_id") @db.Uuid
+  mesa      Mesa              @relation(fields: [mesaId], references: [id])
+  clienteId String?           @map("cliente_id") @db.Uuid
+  cliente   Cliente?          @relation(fields: [clienteId], references: [id])
+  inicio    DateTime          @db.Timestamptz(6)
+  fin       DateTime          @db.Timestamptz(6)
+  personas  Int               @db.SmallInt
+  estado    EstadoReservacion @default(confirmada)
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("reservacion")
+}
+
+// ─────────────────────────── Operación de venta ───────────────────────────
+model Cuenta {
+  id         String       @id @default(uuid()) @db.Uuid
+  sucursalId String       @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal     @relation(fields: [sucursalId], references: [id])
+  mesaId     String?      @map("mesa_id") @db.Uuid
+  mesa       Mesa?        @relation(fields: [mesaId], references: [id])
+  meseroId   String?      @map("mesero_id") @db.Uuid
+  mesero     Empleado?    @relation(fields: [meseroId], references: [id])
+  clienteId  String?      @map("cliente_id") @db.Uuid
+  cliente    Cliente?     @relation(fields: [clienteId], references: [id])
+  tipoVenta  TipoVenta    @map("tipo_venta")
+  estado     EstadoCuenta @default(abierta)
+  abiertaEn  DateTime     @default(now()) @map("abierta_en") @db.Timestamptz(6)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  comandas Comanda[]
+  factura  Factura?
+
+  @@map("cuenta")
+}
+
+model Comanda {
+  id        String        @id @default(uuid()) @db.Uuid
+  cuentaId  String        @map("cuenta_id") @db.Uuid
+  cuenta    Cuenta        @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
+  folio     String        @db.VarChar(20)
+  estacion  Estacion
+  estado    EstadoComanda @default(pendiente)
+  origen    String?       @db.VarChar(40)
+  creadaEn  DateTime      @default(now()) @map("creada_en") @db.Timestamptz(6)
+  listaEn   DateTime?     @map("lista_en") @db.Timestamptz(6)
+  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  detalles ComandaDetalle[]
+
+  @@unique([cuentaId, folio])
+  @@index([estado, estacion])
+  @@map("comanda")
+}
+
+model ComandaDetalle {
+  id         String   @id @default(uuid()) @db.Uuid
+  comandaId  String   @map("comanda_id") @db.Uuid
+  comanda    Comanda  @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  productoId String   @map("producto_id") @db.Uuid
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  cantidad   Int      @db.SmallInt
+  nota       String?  @db.VarChar(200)
+
+  facturaDetalles FacturaDetalle[]
+
+  @@map("comanda_detalle")
+}
+
+// ─────────────────────────────── Facturación ───────────────────────────────
+model Impuesto {
+  id               String   @id @default(uuid()) @db.Uuid
+  nombre           String   @db.VarChar(60)
+  tasa             Decimal  @db.Decimal(5, 2)
+  incluidoEnPrecio Boolean  @map("incluido_en_precio")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("impuesto")
+}
+
+model FormaPago {
+  id                 String   @id @default(uuid()) @db.Uuid
+  nombre             String   @db.VarChar(40)
+  requiereReferencia Boolean  @default(false) @map("requiere_referencia")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  pagos Pago[]
+
+  @@map("forma_pago")
+}
+
+model Factura {
+  id            String        @id @default(uuid()) @db.Uuid
+  sucursalId    String        @map("sucursal_id") @db.Uuid
+  sucursal      Sucursal      @relation(fields: [sucursalId], references: [id])
+  cuentaId      String?       @unique @map("cuenta_id") @db.Uuid
+  cuenta        Cuenta?       @relation(fields: [cuentaId], references: [id])
+  clienteId     String?       @map("cliente_id") @db.Uuid
+  cliente       Cliente?      @relation(fields: [clienteId], references: [id])
+  cajaSesionId  String?       @map("caja_sesion_id") @db.Uuid
+  cajaSesion    CajaSesion?   @relation(fields: [cajaSesionId], references: [id])
+  usuarioId     String        @map("usuario_id") @db.Uuid
+  usuario       Usuario       @relation(fields: [usuarioId], references: [id])
+  origen        OrigenFactura @default(pos)
+  serie         String        @db.VarChar(10)
+  folio         BigInt
+  tipoVenta     TipoVentaDoc  @map("tipo_venta")
+  subtotal      Decimal       @db.Decimal(12, 4)
+  descuento     Decimal       @default(0) @db.Decimal(12, 4)
+  impuestoTotal Decimal       @map("impuesto_total") @db.Decimal(12, 4)
+  total         Decimal       @db.Decimal(12, 2)
+  estado        EstadoFactura @default(emitida)
+  emitidaEn     DateTime      @default(now()) @map("emitida_en") @db.Timestamptz(6)
+
+  detalles       FacturaDetalle[]
+  pagos          Pago[]
+  notaCredito    NotaCredito?
+  promociones    PromocionAplicacion[]
+  movimientosInv MovimientoInventario[]
+  movimientosLtd MovimientoLealtad[]
+
+  @@unique([sucursalId, serie, folio])
+  @@index([sucursalId, emitidaEn])
+  @@map("factura")
+}
+
+model FacturaDetalle {
+  id               String          @id @default(uuid()) @db.Uuid
+  facturaId        String          @map("factura_id") @db.Uuid
+  factura          Factura         @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  productoId       String          @map("producto_id") @db.Uuid
+  producto         Producto        @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  comandaDetalleId String?         @map("comanda_detalle_id") @db.Uuid
+  comandaDetalle   ComandaDetalle? @relation(fields: [comandaDetalleId], references: [id])
+  descripcion      String          @db.VarChar(160)
+  cantidad         Decimal         @db.Decimal(12, 4)
+  precioUnitario   Decimal         @map("precio_unitario") @db.Decimal(12, 4)
+  impuestoTasa     Decimal         @map("impuesto_tasa") @db.Decimal(5, 2)
+  esCortesia       Boolean         @default(false) @map("es_cortesia")
+
+  modificadores FacturaDetalleModificador[]
+
+  @@map("factura_detalle")
+}
+
+model FacturaDetalleModificador {
+  id                  String             @id @default(uuid()) @db.Uuid
+  facturaDetalleId    String             @map("factura_detalle_id") @db.Uuid
+  facturaDetalle      FacturaDetalle     @relation(fields: [facturaDetalleId], references: [id], onDelete: Cascade)
+  opcionModificadorId String?            @map("opcion_modificador_id") @db.Uuid
+  opcionModificador   OpcionModificador? @relation(fields: [opcionModificadorId], references: [id])
+  nombre              String             @db.VarChar(80)
+  precioExtra         Decimal            @map("precio_extra") @db.Decimal(12, 4)
+
+  @@map("factura_detalle_modificador")
+}
+
+model Pago {
+  id          String    @id @default(uuid()) @db.Uuid
+  facturaId   String    @map("factura_id") @db.Uuid
+  factura     Factura   @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  formaPagoId String    @map("forma_pago_id") @db.Uuid
+  formaPago   FormaPago @relation(fields: [formaPagoId], references: [id], onDelete: Restrict)
+  monto       Decimal   @db.Decimal(12, 4)
+  recibido    Decimal?  @db.Decimal(12, 4)
+  referencia  String?   @db.VarChar(60)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("pago")
+}
+
+model NotaCredito {
+  id        String   @id @default(uuid()) @db.Uuid
+  facturaId String   @unique @map("factura_id") @db.Uuid
+  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Restrict)
+  usuarioId String   @map("usuario_id") @db.Uuid
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  motivo    String   @db.VarChar(200)
+  monto     Decimal  @db.Decimal(12, 2)
+  emitidaEn DateTime @default(now()) @map("emitida_en") @db.Timestamptz(6)
+
+  @@map("nota_credito")
+}
+
+// ─────────────────────────────── Promociones ───────────────────────────────
+model Promocion {
+  id            String    @id @default(uuid()) @db.Uuid
+  sucursalId    String    @map("sucursal_id") @db.Uuid
+  sucursal      Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre        String    @db.VarChar(120)
+  tipo          TipoPromo
+  valor         Decimal   @db.Decimal(12, 4)
+  vigenciaDesde DateTime? @map("vigencia_desde") @db.Timestamptz(6)
+  vigenciaHasta DateTime? @map("vigencia_hasta") @db.Timestamptz(6)
+  activa        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  objetivos    PromocionObjetivo[]
+  componentes  ComboComponente[]
+  aplicaciones PromocionAplicacion[]
+
+  @@map("promocion")
+}
+
+model PromocionObjetivo {
+  id          String     @id @default(uuid()) @db.Uuid
+  promocionId String     @map("promocion_id") @db.Uuid
+  promocion   Promocion  @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+  productoId  String?    @map("producto_id") @db.Uuid
+  producto    Producto?  @relation(fields: [productoId], references: [id])
+  categoriaId String?    @map("categoria_id") @db.Uuid
+  categoria   Categoria? @relation(fields: [categoriaId], references: [id])
+
+  @@map("promocion_objetivo")
+}
+
+model ComboComponente {
+  id          String    @id @default(uuid()) @db.Uuid
+  promocionId String    @map("promocion_id") @db.Uuid
+  promocion   Promocion @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+  productoId  String    @map("producto_id") @db.Uuid
+  producto    Producto  @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  cantidad    Int       @db.SmallInt
+
+  @@map("combo_componente")
+}
+
+model PromocionAplicacion {
+  id                String    @id @default(uuid()) @db.Uuid
+  promocionId       String    @map("promocion_id") @db.Uuid
+  promocion         Promocion @relation(fields: [promocionId], references: [id], onDelete: Restrict)
+  facturaId         String    @map("factura_id") @db.Uuid
+  factura           Factura   @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  descuentoAplicado Decimal   @map("descuento_aplicado") @db.Decimal(12, 4)
+
+  @@map("promocion_aplicacion")
+}
+
+// ─────────────────────────────── Caja ───────────────────────────────
+model Caja {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(40)
+  activa     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  sesiones CajaSesion[]
+
+  @@map("caja")
+}
+
+model CajaSesion {
+  id               String           @id @default(uuid()) @db.Uuid
+  sucursalId       String           @map("sucursal_id") @db.Uuid
+  sucursal         Sucursal         @relation(fields: [sucursalId], references: [id])
+  cajaId           String?          @map("caja_id") @db.Uuid
+  caja             Caja?            @relation(fields: [cajaId], references: [id])
+  usuarioId        String           @map("usuario_id") @db.Uuid
+  usuario          Usuario          @relation(fields: [usuarioId], references: [id])
+  fondoApertura    Decimal          @map("fondo_apertura") @db.Decimal(12, 4)
+  efectivoEsperado Decimal?         @map("efectivo_esperado") @db.Decimal(12, 4)
+  efectivoContado  Decimal?         @map("efectivo_contado") @db.Decimal(12, 4)
+  estado           EstadoCajaSesion @default(abierta)
+  abiertaEn        DateTime         @default(now()) @map("abierta_en") @db.Timestamptz(6)
+  cerradaEn        DateTime?        @map("cerrada_en") @db.Timestamptz(6)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  movimientos CajaMovimiento[]
+  facturas    Factura[]
+
+  @@map("caja_sesion")
+}
+
+model CajaMovimiento {
+  id           String      @id @default(uuid()) @db.Uuid
+  cajaSesionId String      @map("caja_sesion_id") @db.Uuid
+  cajaSesion   CajaSesion  @relation(fields: [cajaSesionId], references: [id], onDelete: Cascade)
+  tipo         TipoCajaMov
+  concepto     String      @db.VarChar(120)
+  monto        Decimal     @db.Decimal(12, 4)
+  registradoEn DateTime    @default(now()) @map("registrado_en") @db.Timestamptz(6)
+
+  @@map("caja_movimiento")
+}
+
+// ─────────────────────────── Clientes y fidelización ───────────────────────────
+model Cliente {
+  id         String    @id @default(uuid()) @db.Uuid
+  sucursalId String    @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre     String    @db.VarChar(120)
+  nit        String?   @db.VarChar(20)
+  telefono   String?   @db.VarChar(30)
+  email      String?   @db.VarChar(160)
+  puntos     Int       @default(0)
+  visitas    Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  cuentas        Cuenta[]
+  facturas       Factura[]
+  movimientosLtd MovimientoLealtad[]
+  reservaciones  Reservacion[]
+
+  @@map("cliente")
+}
+
+model ConfigLealtad {
+  id                String   @id @default(uuid()) @db.Uuid
+  sucursalId        String   @unique @map("sucursal_id") @db.Uuid
+  sucursal          Sucursal @relation(fields: [sucursalId], references: [id])
+  quetzalesPorPunto Decimal  @map("quetzales_por_punto") @db.Decimal(12, 4)
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("config_lealtad")
+}
+
+model Recompensa {
+  id          String         @id @default(uuid()) @db.Uuid
+  sucursalId  String         @map("sucursal_id") @db.Uuid
+  sucursal    Sucursal       @relation(fields: [sucursalId], references: [id])
+  nombre      String         @db.VarChar(120)
+  tipo        TipoRecompensa
+  costoPuntos Int            @map("costo_puntos")
+  productoId  String?        @map("producto_id") @db.Uuid
+  producto    Producto?      @relation(fields: [productoId], references: [id])
+  valor       Decimal?       @db.Decimal(12, 4)
+  activa      Boolean        @default(true)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?      @map("deleted_at") @db.Timestamptz(6)
+
+  movimientosLtd MovimientoLealtad[]
+
+  @@map("recompensa")
+}
+
+model MovimientoLealtad {
+  id           String         @id @default(uuid()) @db.Uuid
+  clienteId    String         @map("cliente_id") @db.Uuid
+  cliente      Cliente        @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  facturaId    String?        @map("factura_id") @db.Uuid
+  factura      Factura?       @relation(fields: [facturaId], references: [id])
+  recompensaId String?        @map("recompensa_id") @db.Uuid
+  recompensa   Recompensa?    @relation(fields: [recompensaId], references: [id])
+  tipo         TipoMovLealtad
+  puntos       Int
+  descripcion  String         @db.VarChar(120)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([clienteId, createdAt])
+  @@map("movimiento_lealtad")
+}
+
+// ─────────────────────────────── Gastos ───────────────────────────────
+model CategoriaGasto {
+  id        String   @id @default(uuid()) @db.Uuid
+  nombre    String   @unique @db.VarChar(60)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  gastos Gasto[]
+
+  @@map("categoria_gasto")
+}
+
+model Gasto {
+  id               String         @id @default(uuid()) @db.Uuid
+  sucursalId       String         @map("sucursal_id") @db.Uuid
+  sucursal         Sucursal       @relation(fields: [sucursalId], references: [id])
+  categoriaGastoId String         @map("categoria_gasto_id") @db.Uuid
+  categoriaGasto   CategoriaGasto @relation(fields: [categoriaGastoId], references: [id], onDelete: Restrict)
+  proveedorId      String?        @map("proveedor_id") @db.Uuid
+  proveedor        Proveedor?     @relation(fields: [proveedorId], references: [id])
+  usuarioId        String         @map("usuario_id") @db.Uuid
+  usuario          Usuario        @relation(fields: [usuarioId], references: [id])
+  concepto         String         @db.VarChar(160)
+  monto            Decimal        @db.Decimal(12, 4)
+  metodo           MetodoGasto
+  estado           EstadoGasto    @default(pendiente)
+  fecha            DateTime       @default(now()) @db.Date
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("gasto")
+}
+
+// ─────────────────────────────── Secuencias ───────────────────────────────
+model FolioSecuencia {
+  sucursalId String   @map("sucursal_id") @db.Uuid
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
+  ambito     String   @db.VarChar(30)
+  ultimo     BigInt   @default(0)
+
+  @@id([sucursalId, ambito])
+  @@map("folio_secuencia")
+}
