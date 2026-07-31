@@ -13,11 +13,18 @@ dashboardRouter.get(
     const sucursalId = req.user!.sucursalId;
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
+    const ayer = new Date(hoy);
+    ayer.setDate(ayer.getDate() - 1);
 
     const whereHoy = { sucursalId, estado: 'emitida' as const, emitidaEn: { gte: hoy } };
 
-    const [agg, ultimasRaw, topProductos] = await Promise.all([
+    const [agg, aggAyer, ultimasRaw, topProductos, porHoraRaw, lealtadRaw, clientesAgg, clientesConPuntos] =
+      await Promise.all([
       prisma.factura.aggregate({ _sum: { total: true }, _count: true, where: whereHoy }),
+      prisma.factura.aggregate({
+        _sum: { total: true },
+        where: { sucursalId, estado: 'emitida', emitidaEn: { gte: ayer, lt: hoy } },
+      }),
       prisma.factura.findMany({
         where: { sucursalId, estado: 'emitida' },
         orderBy: { emitidaEn: 'desc' },
@@ -33,15 +40,35 @@ dashboardRouter.get(
         GROUP BY p.nombre
         ORDER BY ingreso DESC
         LIMIT 6`,
+      prisma.$queryRaw<{ hora: number; monto: string }[]>`
+        SELECT EXTRACT(HOUR FROM emitida_en AT TIME ZONE 'America/Guatemala')::int AS hora,
+               SUM(total) AS monto
+        FROM factura
+        WHERE sucursal_id = ${sucursalId}::uuid AND estado = 'emitida' AND emitida_en >= ${hoy}
+        GROUP BY hora
+        ORDER BY hora`,
+      prisma.movimientoLealtad.groupBy({
+        by: ['tipo'],
+        _sum: { puntos: true },
+        _count: true,
+        where: { createdAt: { gte: hoy }, cliente: { sucursalId } },
+      }),
+      prisma.cliente.aggregate({ _sum: { puntos: true }, _count: true, where: { sucursalId, deletedAt: null } }),
+      prisma.cliente.count({ where: { sucursalId, deletedAt: null, puntos: { gt: 0 } } }),
     ]);
 
     const ventasHoy = Number(agg._sum.total ?? 0);
     const transacciones = agg._count;
 
+    const acum = lealtadRaw.find((r) => r.tipo === 'acumula');
+    const canj = lealtadRaw.find((r) => r.tipo === 'canjea');
+
     res.json({
       ventasHoy,
+      ventasAyer: Number(aggAyer._sum.total ?? 0),
       transacciones,
       ticketPromedio: transacciones > 0 ? ventasHoy / transacciones : 0,
+      ventasPorHora: porHoraRaw.map((h) => ({ hora: Number(h.hora), monto: Number(h.monto) })),
       ultimasVentas: ultimasRaw.map((f) => ({
         id: f.id,
         folio: Number(f.folio),
@@ -55,6 +82,14 @@ dashboardRouter.get(
         unidades: Number(t.unidades),
         ingreso: Number(t.ingreso),
       })),
+      lealtad: {
+        puntosOtorgados: acum?._sum.puntos ?? 0,
+        puntosCanjeados: Math.abs(canj?._sum.puntos ?? 0),
+        canjes: canj?._count ?? 0,
+        clientesConPuntos,
+        puntosEnCirculacion: clientesAgg._sum.puntos ?? 0,
+        totalClientes: clientesAgg._count,
+      },
     });
   }),
 );

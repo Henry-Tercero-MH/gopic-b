@@ -204,6 +204,7 @@ model Usuario {
   empleado         Empleado? @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
   sucursalId       String    @map("sucursal_id") @db.Uuid
   sucursal         Sucursal  @relation(fields: [sucursalId], references: [id])
+  nombre           String?   @db.VarChar(120)
   email            String    @unique @db.VarChar(160)
   passwordHash     String    @map("password_hash") @db.VarChar(255)
   intentosFallidos Int       @default(0) @map("intentos_fallidos") @db.SmallInt
@@ -331,6 +332,7 @@ model Empleado {
   nombre       String    @db.VarChar(120)
   telefono     String?   @db.VarChar(30)
   email        String?   @db.VarChar(160)
+  turno        String?   @db.VarChar(60)
   fechaIngreso DateTime  @map("fecha_ingreso") @db.Date
   fotoDriveId  String?   @map("foto_drive_id") @db.VarChar(100)
   activo       Boolean   @default(true)
@@ -884,6 +886,8 @@ model Promocion {
   nombre        String    @db.VarChar(120)
   tipo          TipoPromo
   valor         Decimal   @db.Decimal(12, 4)
+  aplicaEn      String?   @map("aplica_en") @db.VarChar(120)
+  vigencia      String?   @db.VarChar(120)
   vigenciaDesde DateTime? @map("vigencia_desde") @db.Timestamptz(6)
   vigenciaHasta DateTime? @map("vigencia_hasta") @db.Timestamptz(6)
   activa        Boolean   @default(true)

@@ -16,6 +16,16 @@ import { recompensasRouter } from './modules/recompensas/recompensas.routes.js';
 import { dashboardRouter } from './modules/dashboard/dashboard.routes.js';
 import { comandasRouter } from './modules/comandas/comandas.routes.js';
 import { mesasRouter } from './modules/mesas/mesas.routes.js';
+import { inventarioRouter } from './modules/inventario/inventario.routes.js';
+import { gastosRouter } from './modules/gastos/gastos.routes.js';
+import { empleadosRouter } from './modules/empleados/empleados.routes.js';
+import { proveedoresRouter } from './modules/proveedores/proveedores.routes.js';
+import { comprasRouter } from './modules/compras/compras.routes.js';
+import { recetasRouter } from './modules/recetas/recetas.routes.js';
+import { promocionesRouter } from './modules/promociones/promociones.routes.js';
+import { sucursalRouter } from './modules/sucursal/sucursal.routes.js';
+import { rolesRouter } from './modules/roles/roles.routes.js';
+import { usuariosRouter } from './modules/usuarios/usuarios.routes.js';
 
 // PostgreSQL BIGINT (p. ej. factura.folio) llega como BigInt: serialízalo como número en JSON.
 (BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
@@ -57,6 +67,16 @@ export function crearApp() {
   app.use('/dashboard', dashboardRouter);
   app.use('/comandas', comandasRouter);
   app.use('/mesas', mesasRouter);
+  app.use('/insumos', inventarioRouter);
+  app.use('/gastos', gastosRouter);
+  app.use('/empleados', empleadosRouter);
+  app.use('/proveedores', proveedoresRouter);
+  app.use('/ordenes-compra', comprasRouter);
+  app.use('/recetas', recetasRouter);
+  app.use('/promociones', promocionesRouter);
+  app.use('/sucursal', sucursalRouter);
+  app.use('/roles', rolesRouter);
+  app.use('/usuarios', usuariosRouter);
 
   // 404
   app.use((_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
