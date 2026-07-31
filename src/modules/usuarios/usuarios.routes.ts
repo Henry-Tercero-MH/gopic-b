@@ -25,6 +25,7 @@ usuariosRouter.get(
         id: u.id,
         nombre: u.nombre ?? u.empleado?.nombre ?? u.email,
         email: u.email,
+        telefono: u.telefono ?? '',
         activo: u.activo,
         rolId: u.roles[0]?.rol.id ?? null,
         rol: u.roles[0]?.rol.nombre ?? '—',
@@ -36,6 +37,7 @@ usuariosRouter.get(
 const crearSchema = z.object({
   nombre: z.string().min(1).max(120),
   email: z.string().email().max(160),
+  telefono: z.string().max(30).optional(),
   password: z.string().min(6).max(100),
   rolId: z.string().uuid(),
 });
@@ -57,6 +59,7 @@ usuariosRouter.post(
       data: {
         sucursalId,
         nombre: d.nombre,
+        telefono: d.telefono || null,
         email: d.email,
         passwordHash: hashPassword(d.password),
         roles: { create: { rolId: d.rolId } },
@@ -68,6 +71,7 @@ usuariosRouter.post(
 
 const editarSchema = z.object({
   nombre: z.string().min(1).max(120).optional(),
+  telefono: z.string().max(30).optional(),
   activo: z.boolean().optional(),
   rolId: z.string().uuid().optional(),
   password: z.string().min(6).max(100).optional(),
@@ -92,6 +96,7 @@ usuariosRouter.patch(
         where: { id: usuario.id },
         data: {
           nombre: d.nombre,
+          telefono: d.telefono !== undefined ? d.telefono || null : undefined,
           activo: d.activo,
           ...(d.password ? { passwordHash: hashPassword(d.password) } : {}),
         },
@@ -116,7 +121,11 @@ usuariosRouter.delete(
       where: { id: req.params.id, sucursalId: req.user!.sucursalId, deletedAt: null },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
-    await prisma.usuario.update({ where: { id: usuario.id }, data: { deletedAt: new Date(), activo: false } });
+    // Al eliminar la cuenta se liberan sus roles (no debe seguir contando en ellos).
+    await prisma.$transaction([
+      prisma.usuarioRol.deleteMany({ where: { usuarioId: usuario.id } }),
+      prisma.usuario.update({ where: { id: usuario.id }, data: { deletedAt: new Date(), activo: false } }),
+    ]);
     res.status(204).send();
   }),
 );

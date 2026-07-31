@@ -39,15 +39,26 @@ comandasRouter.post(
       return res.status(400).json({ error: 'Algún producto no pertenece a la sucursal.' });
     }
 
-    const creadas = await prisma.$transaction(async (tx) => {
-      const cuenta = await tx.cuenta.create({
-        data: {
-          sucursalId,
-          mesaId: d.tipoVenta === 'mesa' ? d.mesaId : null,
-          tipoVenta: d.tipoVenta,
-          estado: 'abierta',
-        },
-      });
+    const resultado = await prisma.$transaction(async (tx) => {
+      // En mesa se acumulan rondas: reutiliza la cuenta abierta o crea una nueva.
+      let cuenta =
+        d.tipoVenta === 'mesa' && d.mesaId
+          ? await tx.cuenta.findFirst({ where: { mesaId: d.mesaId, sucursalId, estado: 'abierta' } })
+          : null;
+      if (!cuenta) {
+        cuenta = await tx.cuenta.create({
+          data: {
+            sucursalId,
+            mesaId: d.tipoVenta === 'mesa' ? d.mesaId : null,
+            tipoVenta: d.tipoVenta,
+            estado: 'abierta',
+          },
+        });
+      }
+      // Al enviar a cocina, la mesa queda ocupada.
+      if (d.tipoVenta === 'mesa' && d.mesaId) {
+        await tx.mesa.update({ where: { id: d.mesaId }, data: { estado: 'ocupada' } });
+      }
 
       // Agrupa los ítems por estación (Cocina / Barra) → una comanda por grupo.
       const porEstacion = new Map<string, typeof d.items>();
@@ -72,10 +83,10 @@ comandasRouter.post(
         });
         out.push(comanda);
       }
-      return out;
+      return { cuentaId: cuenta.id, comandas: out };
     });
 
-    res.status(201).json(creadas);
+    res.status(201).json(resultado);
   }),
 );
 
@@ -96,6 +107,31 @@ comandasRouter.get(
         estado: c.estado,
         origen: c.origen,
         creadaEn: c.creadaEn,
+        items: c.detalles.map((dd) => ({ nombre: dd.producto.nombre, cantidad: dd.cantidad, nota: dd.nota })),
+      })),
+    );
+  }),
+);
+
+/** GET /comandas/historial — últimas comandas entregadas (para el KDS). */
+comandasRouter.get(
+  '/historial',
+  ah(async (req, res) => {
+    const comandas = await prisma.comanda.findMany({
+      where: { cuenta: { sucursalId: req.user!.sucursalId }, estado: 'entregada' },
+      include: { detalles: { include: { producto: { select: { nombre: true } } } } },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+    });
+    res.json(
+      comandas.map((c) => ({
+        id: c.id,
+        folio: c.folio,
+        estacion: c.estacion,
+        estado: c.estado,
+        origen: c.origen,
+        creadaEn: c.creadaEn,
+        entregadaEn: c.updatedAt,
         items: c.detalles.map((dd) => ({ nombre: dd.producto.nombre, cantidad: dd.cantidad, nota: dd.nota })),
       })),
     );

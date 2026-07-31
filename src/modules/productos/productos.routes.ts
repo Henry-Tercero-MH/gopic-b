@@ -25,7 +25,10 @@ productosRouter.get(
   ah(async (req, res) => {
     const productos = await prisma.producto.findMany({
       where: { sucursalId: req.user!.sucursalId, deletedAt: null },
-      include: { categoria: { select: { id: true, nombre: true } } },
+      include: {
+        categoria: { select: { id: true, nombre: true } },
+        gruposMod: { select: { grupoModificadorId: true } },
+      },
       orderBy: { nombre: 'asc' },
     });
     res.json(productos);

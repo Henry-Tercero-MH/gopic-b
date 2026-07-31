@@ -205,8 +205,11 @@ model Usuario {
   sucursalId       String    @map("sucursal_id") @db.Uuid
   sucursal         Sucursal  @relation(fields: [sucursalId], references: [id])
   nombre           String?   @db.VarChar(120)
+  telefono         String?   @db.VarChar(30)
   email            String    @unique @db.VarChar(160)
   passwordHash     String    @map("password_hash") @db.VarChar(255)
+  resetToken       String?   @map("reset_token") @db.VarChar(255)
+  resetTokenExp    DateTime? @map("reset_token_exp") @db.Timestamptz(6)
   intentosFallidos Int       @default(0) @map("intentos_fallidos") @db.SmallInt
   bloqueadoHasta   DateTime? @map("bloqueado_hasta") @db.Timestamptz(6)
   activo           Boolean   @default(true)

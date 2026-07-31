@@ -9,6 +9,8 @@ const schema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   JWT_SECRET: z.string().min(16).default('dev-secret-cambia-esto-en-produccion'),
   JWT_EXPIRES: z.string().default('8h'),
+  // URL pública del frontend, para armar el enlace de restablecimiento de contraseña.
+  FRONTEND_URL: z.string().url().default('http://localhost:5173'),
 });
 
 const parsed = schema.safeParse(process.env);

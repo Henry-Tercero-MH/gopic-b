@@ -82,6 +82,16 @@ ventasRouter.post(
       if (v.clienteId && v.recompensaId && venta) {
         await tx.$queryRaw`SELECT canjear_recompensa(${v.clienteId}::uuid, ${v.recompensaId}::uuid, ${venta.factura_id}::uuid)`;
       }
+
+      // Al cobrar una cuenta (servicio en mesa): ciérrala y libera la mesa.
+      if (v.cuentaId) {
+        const cuenta = await tx.cuenta.update({
+          where: { id: v.cuentaId },
+          data: { estado: 'cobrada' },
+          select: { mesaId: true },
+        });
+        if (cuenta.mesaId) await tx.mesa.update({ where: { id: cuenta.mesaId }, data: { estado: 'libre' } });
+      }
       return venta;
     });
 
